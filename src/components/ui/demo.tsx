@@ -1,51 +1,53 @@
-import { Sprout } from "lucide-react";
+import { GLSLHills } from "@/components/ui/glsl-hills";
 
-import { HeroLanding } from "@/components/ui/hero-1";
-import type { HeroLandingProps } from "@/components/ui/hero-1";
+export default function DemoOne() {
+  function handleGetStarted() {
+    const nextSection = document.querySelector("#intake");
+    if (!nextSection) {
+      return;
+    }
 
-export default function Demo() {
-  const heroProps: HeroLandingProps = {
-    logo: {
-      icon: Sprout,
-      companyName: "SKYLOOK",
-    },
-    navigation: [],
-    loginText: "",
-    loginHref: "",
-    title: (
-      <span className="flex flex-col items-center gap-3">
-        <span className="text-[0.58em] tracking-[0.45em] text-foreground/90">
+    nextSection.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
+  return (
+    <div className="hero-page relative flex h-full w-full flex-col items-center justify-center overflow-hidden">
+      <div className="absolute left-6 top-6 z-20 flex items-center gap-3 md:left-8 md:top-8">
+        <img src="/icon.png" alt="Skylook tree icon" className="h-9 w-9 object-contain" />
+        <span className="text-sm font-normal tracking-normal text-slate-100">
+          skylook
+        </span>
+      </div>
+      <div className="hero-radar-background" aria-hidden="true">
+        <img src="/chatgpt.png" alt="" className="hero-radar-background__image" />
+      </div>
+      <GLSLHills />
+      <div className="hero-content absolute z-10 text-center">
+        <h1
+          className="font-display text-6xl font-black tracking-[0.28em] text-slate-100 md:text-8xl"
+          style={{
+            textShadow:
+              "0 0 14px rgba(79, 195, 255, 0.95), 0 0 38px rgba(79, 195, 255, 0.65), 0 0 72px rgba(61, 220, 151, 0.35)",
+          }}
+        >
           SKYLOOK
-        </span>
-        <span className="text-[0.38em] tracking-[0.1em] text-foreground">
-          AgriSense Smart Downlink
-        </span>
-      </span>
-    ),
-    description: "Satellite intelligence for bandwidth-aware agricultural response.",
-    announcementBanner: {
-      text: "TerraMind Tiny mission workflow is live.",
-      linkText: "Jump to the command dashboard",
-      linkHref: "#summary",
-    },
-    callToActions: [
-      {
-        text: "Stage Batch",
-        href: "#intake",
-        variant: "primary",
-      },
-      {
-        text: "Review Results",
-        href: "#results",
-        variant: "secondary",
-      },
-    ],
-    titleSize: "large",
-    gradientColors: {
-      from: "oklch(0.62 0.16 197)",
-      to: "oklch(0.73 0.17 96)",
-    },
-  };
-
-  return <HeroLanding {...heroProps} />;
+        </h1>
+        <div className="space-y-3 text-center">
+          <p className="font-display text-2xl font-bold text-slate-100 md:text-4xl">
+            AgriSense Smart Downlink
+          </p>
+          <p className="mx-auto max-w-2xl text-sm text-slate-200/85 md:text-lg">
+            Satellite intelligence for bandwidth-aware agricultural response.
+          </p>
+        </div>
+        <button
+          type="button"
+          className="hero-glass-button"
+          onClick={handleGetStarted}
+        >
+          Get Started
+        </button>
+      </div>
+    </div>
+  );
 }

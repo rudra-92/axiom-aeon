@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import Demo from "@/components/ui/demo";
+import { GLSLHills } from "@/components/ui/glsl-hills";
 import {
   PIPELINE_STEPS,
   createPreviewItem,
@@ -329,6 +330,20 @@ export default function App() {
       <Demo />
 
       <main className="dashboard-shell">
+        <div className="dashboard-shell__video-stage" aria-hidden="true">
+          <video
+            className="dashboard-shell__video"
+            autoPlay
+            muted
+            loop
+            playsInline
+          >
+            <source src="/dashboard-center.mp4" type="video/mp4" />
+          </video>
+        </div>
+        <div className="dashboard-shell__background" aria-hidden="true">
+          <GLSLHills height="100%" cameraZ={110} planeSize={192} speed={0.3} />
+        </div>
         <div className="dashboard-grid">
           <div className="dashboard-grid__primary">
             <UploadPanel

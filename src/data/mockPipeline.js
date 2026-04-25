@@ -138,6 +138,9 @@ function measureImage(image) {
   let dryPixels = 0;
   let edgeHits = 0;
   let edgeChecks = 0;
+  let lowSaturationPixels = 0;
+  let shadowPixels = 0;
+  let highlightPixels = 0;
   const grayscaleValues = [];
 
   for (let pixelIndex = 0; pixelIndex < totalPixels; pixelIndex += 1) {
@@ -148,6 +151,7 @@ function measureImage(image) {
     const brightness = grayscaleAt(data, offset) / 255;
     const maxChannel = Math.max(red, green, blue);
     const minChannel = Math.min(red, green, blue);
+    const saturation = (maxChannel - minChannel) / Math.max(maxChannel, 1);
 
     brightnessTotal += brightness;
     grayscaleValues.push(brightness);
@@ -166,6 +170,18 @@ function measureImage(image) {
 
     if (red > green + 6 && green > blue) {
       dryPixels += 1;
+    }
+
+    if (saturation < 0.14) {
+      lowSaturationPixels += 1;
+    }
+
+    if (brightness < 0.18) {
+      shadowPixels += 1;
+    }
+
+    if (brightness > 0.84) {
+      highlightPixels += 1;
     }
   }
 
@@ -194,6 +210,21 @@ function measureImage(image) {
   const variance =
     grayscaleValues.reduce((sum, value) => sum + (value - brightnessMean) ** 2, 0) /
     totalPixels;
+  const detailScore = clamp(edgeChecks === 0 ? 0 : edgeHits / edgeChecks, 0, 1);
+  const dynamicRangePenalty = clamp(
+    Math.max(0, 0.22 - Math.sqrt(variance)) * 1.8 +
+      Math.max(0, shadowPixels / totalPixels - 0.38) * 0.9 +
+      Math.max(0, highlightPixels / totalPixels - 0.24) * 0.7,
+    0,
+    1,
+  );
+  const lowClarityScore = clamp(
+    (lowSaturationPixels / totalPixels) * 0.45 +
+      Math.max(0, 0.16 - detailScore) * 2.4 +
+      dynamicRangePenalty * 0.55,
+    0,
+    1,
+  );
 
   return {
     width: image.naturalWidth,
@@ -204,57 +235,83 @@ function measureImage(image) {
     waterRatio: blueDominantPixels / totalPixels,
     neutralRatio: grayPixels / totalPixels,
     dryRatio: dryPixels / totalPixels,
-    edgeDensity: edgeChecks === 0 ? 0 : edgeHits / edgeChecks,
+    edgeDensity: detailScore,
+    lowSaturationRatio: lowSaturationPixels / totalPixels,
+    shadowRatio: shadowPixels / totalPixels,
+    highlightRatio: highlightPixels / totalPixels,
+    lowClarityScore,
   };
 }
 
 function inferSceneType(profile, seed) {
-  if (profile.waterRatio >= 0.34 && profile.vegetationRatio < 0.24) {
+  const clarityCompensation = profile.lowClarityScore * 0.08;
+  const vegetationSignal =
+    profile.vegetationRatio + profile.dryRatio * 0.16 - profile.waterRatio * 0.08;
+
+  if (
+    profile.waterRatio >= 0.38 &&
+    vegetationSignal < 0.22 &&
+    profile.lowClarityScore < 0.72
+  ) {
     return "water";
   }
 
   if (
-    profile.neutralRatio >= 0.32 &&
-    profile.edgeDensity >= 0.16 &&
-    profile.vegetationRatio < 0.26
+    profile.neutralRatio >= 0.36 &&
+    profile.edgeDensity >= 0.15 &&
+    vegetationSignal < 0.23 &&
+    profile.lowClarityScore < 0.68
   ) {
     return "urban";
   }
 
   if (
-    profile.vegetationRatio < 0.18 &&
-    profile.waterRatio < 0.24 &&
-    profile.brightness > 0.42
+    vegetationSignal < 0.14 + clarityCompensation &&
+    profile.waterRatio < 0.26 &&
+    profile.brightness > 0.46 &&
+    profile.lowClarityScore < 0.82
   ) {
     return "empty";
   }
 
-  return seed % 9 === 0 && profile.vegetationRatio < 0.24 ? "empty" : "crop";
+  return seed % 9 === 0 && vegetationSignal < 0.2 && profile.lowClarityScore < 0.58
+    ? "empty"
+    : "crop";
 }
 
 function inferHealth(profile, seed) {
   const stressScore =
-    profile.dryRatio * 0.52 +
-    Math.max(0, 0.34 - profile.vegetationRatio) * 1.25 +
-    Math.max(0, profile.neutralRatio - 0.28) * 0.45;
+    profile.dryRatio * 0.48 +
+    Math.max(0, 0.24 - profile.vegetationRatio) * 0.72 +
+    Math.max(0, profile.neutralRatio - 0.35) * 0.18 +
+    Math.max(0, profile.shadowRatio - 0.42) * 0.1 +
+    Math.max(0, profile.lowClarityScore - 0.62) * 0.08;
 
-  if (stressScore >= 0.19) {
+  if (stressScore >= 0.26) {
     return "Stressed";
   }
 
-  return seed % 11 === 0 && profile.vegetationRatio < 0.28
-    ? "Stressed"
-    : "Healthy";
+  return "Healthy";
 }
 
 function computeConfidence(seed, profile, offset = 0) {
-  const stabilityBoost = Math.round(profile.contrast * 34 + profile.edgeDensity * 18);
-  return Math.min(99, 70 + ((seed + offset) % 16) + stabilityBoost);
+  const structureBoost = Math.round(profile.contrast * 22 + profile.edgeDensity * 10);
+  const vegetationBoost = Math.round(profile.vegetationRatio * 14 + profile.dryRatio * 8);
+  const clarityPenalty = Math.round(profile.lowClarityScore * 22);
+  return clamp(
+    62 + ((seed + offset) % 14) + structureBoost + vegetationBoost - clarityPenalty,
+    46,
+    96,
+  );
 }
 
 function computeAffectedArea(seed, profile, health) {
-  const vegetationGap = Math.max(0, 0.4 - profile.vegetationRatio);
-  const severity = vegetationGap * 120 + profile.dryRatio * 100 + profile.neutralRatio * 18;
+  const vegetationGap = Math.max(0, 0.38 - (profile.vegetationRatio + profile.lowClarityScore * 0.05));
+  const severity =
+    vegetationGap * 108 +
+    profile.dryRatio * 94 +
+    profile.neutralRatio * 16 +
+    Math.max(0, profile.shadowRatio - 0.28) * 14;
 
   if (health !== "Stressed") {
     return clamp(Math.round(severity / 3 + (seed % 6)), 0, 18);
@@ -271,6 +328,42 @@ function computePriority(health, affectedArea) {
     return affectedArea >= 65 ? "HIGH" : "MEDIUM";
   }
   return "LOW";
+}
+
+function computeQualityTier(profile) {
+  if (profile.lowClarityScore >= 0.66) {
+    return "LOW";
+  }
+
+  if (profile.lowClarityScore >= 0.42) {
+    return "MEDIUM";
+  }
+
+  return "HIGH";
+}
+
+function buildAnalysisReason(profile, health, qualityTier) {
+  if (health === "Healthy") {
+    return qualityTier === "LOW"
+      ? "Low-clarity frame accepted with stable crop signal"
+      : "Stable crop vigor detected";
+  }
+
+  return qualityTier === "LOW"
+    ? "Potential stress detected under low-clarity conditions"
+    : "Low vegetation detected";
+}
+
+function buildDecisionReason({ health, affectedArea, qualityTier, shouldSend }) {
+  if (shouldSend) {
+    return qualityTier === "LOW"
+      ? "Likely agricultural stress detected in low-clarity imagery"
+      : "Agricultural stress requires review";
+  }
+
+  return qualityTier === "LOW"
+    ? "Low-confidence low-clarity crop frame with limited transmission value"
+    : "Healthy crop with low transmission value";
 }
 
 function buildDuplicateGroups(items) {
@@ -433,6 +526,7 @@ export async function runSmartDownlinkPipeline(items, callbacks) {
     return {
       ...item,
       sceneType,
+      qualityTier: computeQualityTier(item.imageProfile),
     };
   });
 
@@ -458,6 +552,7 @@ export async function runSmartDownlinkPipeline(items, callbacks) {
       const confidence = computeConfidence(item.seed, item.imageProfile, stepIndex);
       const affectedArea = computeAffectedArea(item.seed, item.imageProfile, health);
       const priority = computePriority(health, affectedArea);
+      const qualityLabel = item.qualityTier === "LOW" ? "Low-clarity" : item.qualityTier === "MEDIUM" ? "Medium-clarity" : "High-clarity";
 
       if (step.id === "filtering" && item.sceneType !== "crop") {
         callbacks.onItemUpdate(item.id, {
@@ -467,7 +562,10 @@ export async function runSmartDownlinkPipeline(items, callbacks) {
           priority: "LOW",
           affectedArea: "0%",
           confidence: `${confidence}%`,
-          reason: "Non-crop region detected",
+          reason:
+            item.qualityTier === "LOW"
+              ? `${qualityLabel} non-crop region detected`
+              : "Non-crop region detected",
         });
       }
 
@@ -493,7 +591,7 @@ export async function runSmartDownlinkPipeline(items, callbacks) {
         callbacks.onItemUpdate(item.id, {
           tag: "CROP",
           confidence: `${confidence}%`,
-          reason: "TerraMind Tiny embeddings extracted",
+          reason: `${qualityLabel} TerraMind Tiny embeddings extracted`,
           terramindMode: "Tiny / edge-optimized",
         });
       }
@@ -508,10 +606,7 @@ export async function runSmartDownlinkPipeline(items, callbacks) {
           priority,
           affectedArea: `${affectedArea}%`,
           confidence: `${confidence}%`,
-          reason:
-            health === "Healthy"
-              ? "Stable crop vigor detected"
-              : "Low vegetation detected",
+          reason: buildAnalysisReason(item.imageProfile, health, item.qualityTier),
         });
       }
 
@@ -524,7 +619,10 @@ export async function runSmartDownlinkPipeline(items, callbacks) {
           return;
         }
 
-        const shouldSend = health === "Stressed" || affectedArea >= 22;
+        const shouldSend =
+          health === "Stressed" ||
+          affectedArea >= 22 ||
+          (item.qualityTier === "LOW" && affectedArea >= 16 && confidence >= 58);
         callbacks.onItemUpdate(item.id, {
           decision: shouldSend ? "SEND" : "IGNORE",
           tag: "CROP",
@@ -532,9 +630,12 @@ export async function runSmartDownlinkPipeline(items, callbacks) {
           priority: shouldSend ? priority : "LOW",
           affectedArea: `${affectedArea}%`,
           confidence: `${computeConfidence(item.seed, item.imageProfile, 11)}%`,
-          reason: shouldSend
-            ? "Agricultural stress requires review"
-            : "Healthy crop with low transmission value",
+          reason: buildDecisionReason({
+            health,
+            affectedArea,
+            qualityTier: item.qualityTier,
+            shouldSend,
+          }),
           stage: "complete",
           statusText: shouldSend ? "Queued for uplink" : "Ignored after analysis",
         });
